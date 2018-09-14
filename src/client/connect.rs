@@ -10,7 +10,7 @@ use std::mem;
 
 use bytes::{BufMut, BytesMut};
 use futures::Future;
-use http::{uri, Uri};
+use ::http::{uri, Uri};
 use tokio_io::{AsyncRead, AsyncWrite};
 
 #[cfg(feature = "runtime")] pub use self::http::HttpConnector;
@@ -101,8 +101,8 @@ impl Destination {
     /// # Error
     ///
     /// Returns an error if the string is not a valid scheme.
-    pub fn set_scheme(&mut self, scheme: &str) -> ::Result<()> {
-        let scheme = scheme.parse().map_err(::error::Parse::from)?;
+    pub fn set_scheme(&mut self, scheme: &str) -> crate::Result<()> {
+        let scheme = scheme.parse().map_err(crate::error::Parse::from)?;
         self.update_uri(move |parts| {
             parts.scheme = Some(scheme);
         })
@@ -128,14 +128,14 @@ impl Destination {
     /// # Error
     ///
     /// Returns an error if the string is not a valid hostname.
-    pub fn set_host(&mut self, host: &str) -> ::Result<()> {
+    pub fn set_host(&mut self, host: &str) -> crate::Result<()> {
         if host.contains(&['@',':'][..]) {
-            return Err(::error::Parse::Uri.into());
+            return Err(crate::error::Parse::Uri.into());
         }
         let auth = if let Some(port) = self.port() {
-            format!("{}:{}", host, port).parse().map_err(::error::Parse::from)?
+            format!("{}:{}", host, port).parse().map_err(crate::error::Parse::from)?
         } else {
-            host.parse().map_err(::error::Parse::from)?
+            host.parse().map_err(crate::error::Parse::from)?
         };
         self.update_uri(move |parts| {
             parts.authority = Some(auth);
@@ -196,7 +196,7 @@ impl Destination {
             .expect("valid uri should be valid with port");
     }
 
-    fn update_uri<F>(&mut self, f: F) -> ::Result<()>
+    fn update_uri<F>(&mut self, f: F) -> crate::Result<()>
     where
         F: FnOnce(&mut uri::Parts)
     {
@@ -214,7 +214,7 @@ impl Destination {
             },
             Err(err) => {
                 self.uri = old_uri;
-                Err(::error::Parse::from(err).into())
+                Err(crate::error::Parse::from(err).into())
             },
         }
     }
@@ -392,7 +392,7 @@ mod http {
     use futures::future::{Executor, ExecuteError};
     use futures::sync::oneshot;
     use futures_cpupool::{Builder as CpuPoolBuilder};
-    use http::uri::Scheme;
+    use ::http::uri::Scheme;
     use net2::TcpBuilder;
     use tokio_reactor::Handle;
     use tokio_tcp::{TcpStream, ConnectFuture};
@@ -678,7 +678,7 @@ mod http {
                         }
                     },
                     State::Resolving(ref mut future, local_addr) => {
-                        match try!(future.poll()) {
+                        match r#try!(future.poll()) {
                             Async::NotReady => return Ok(Async::NotReady),
                             Async::Ready(addrs) => {
                                 state = State::Connecting(ConnectingTcp::new(

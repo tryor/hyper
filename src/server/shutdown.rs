@@ -1,9 +1,9 @@
 use futures::{Async, Future, Stream, Poll};
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use body::{Body, Payload};
-use common::drain::{self, Draining, Signal, Watch};
-use service::{Service, NewService};
+use crate::body::{Body, Payload};
+use crate::common::drain::{self, Draining, Signal, Watch};
+use crate::service::{Service, NewService};
 use super::SpawnAll;
 
 #[allow(missing_debug_implementations)]
@@ -48,7 +48,7 @@ where
     F: Future<Item=()>,
 {
     type Item = ();
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {

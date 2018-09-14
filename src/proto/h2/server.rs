@@ -3,15 +3,15 @@ use h2::Reason;
 use h2::server::{Builder, Connection, Handshake, SendResponse};
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use ::headers::content_length_parse_all;
-use ::body::Payload;
-use ::common::Exec;
-use ::headers;
-use ::service::Service;
-use ::proto::Dispatched;
+use crate::headers::content_length_parse_all;
+use crate::body::Payload;
+use crate::common::Exec;
+use crate::headers;
+use crate::service::Service;
+use crate::proto::Dispatched;
 use super::{PipeToSendStream, SendBuf};
 
-use ::{Body, Response};
+use crate::{Body, Response};
 
 pub(crate) struct Server<T, S, B>
 where
@@ -85,13 +85,13 @@ where
     B: Payload,
 {
     type Item = Dispatched;
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let next = match self.state {
                 State::Handshaking(ref mut h) => {
-                    let conn = try_ready!(h.poll().map_err(::Error::new_h2));
+                    let conn = try_ready!(h.poll().map_err(crate::Error::new_h2));
                     State::Serving(Serving {
                         conn: conn,
                     })
@@ -116,7 +116,7 @@ where
     T: AsyncRead + AsyncWrite,
     B: Payload,
 {
-    fn poll_server<S>(&mut self, service: &mut S, exec: &Exec) -> Poll<(), ::Error>
+    fn poll_server<S>(&mut self, service: &mut S, exec: &Exec) -> Poll<(), crate::Error>
     where
         S: Service<
             ReqBody=Body,
@@ -125,11 +125,11 @@ where
         S::Error: Into<Box<::std::error::Error + Send + Sync>>,
         S::Future: Send + 'static,
     {
-        while let Some((req, respond)) = try_ready!(self.conn.poll().map_err(::Error::new_h2)) {
+        while let Some((req, respond)) = try_ready!(self.conn.poll().map_err(crate::Error::new_h2)) {
             trace!("incoming request");
             let content_length = content_length_parse_all(req.headers());
             let req = req.map(|stream| {
-                ::Body::h2(stream, content_length)
+                crate::Body::h2(stream, content_length)
             });
             let fut = H2Stream::new(service.call(req), respond);
             exec.execute(fut)?;
@@ -170,7 +170,7 @@ where
         }
     }
 
-    fn poll2(&mut self) -> Poll<(), ::Error> {
+    fn poll2(&mut self) -> Poll<(), crate::Error> {
         loop {
             let next = match self.state {
                 H2StreamState::Service(ref mut h) => {
@@ -180,14 +180,14 @@ where
                             // Body is not yet ready, so we want to check if the client has sent a
                             // RST_STREAM frame which would cancel the current request.
                             if let Async::Ready(reason) =
-                                self.reply.poll_reset().map_err(|e| ::Error::new_h2(e))?
+                                self.reply.poll_reset().map_err(|e| crate::Error::new_h2(e))?
                             {
                                 debug!("stream received RST_STREAM: {:?}", reason);
-                                return Err(::Error::new_h2(reason.into()));
+                                return Err(crate::Error::new_h2(reason.into()));
                             }
                             return Ok(Async::NotReady);
                         }
-                        Err(e) => return Err(::Error::new_user_service(e)),
+                        Err(e) => return Err(crate::Error::new_user_service(e)),
                     };
 
                     let (head, body) = res.into_parts();
@@ -203,7 +203,7 @@ where
                                 Err(e) => {
                                     trace!("send response error: {}", e);
                                     self.reply.send_reset(Reason::INTERNAL_ERROR);
-                                    return Err(::Error::new_h2(e));
+                                    return Err(crate::Error::new_h2(e));
                                 }
                             }
                         })

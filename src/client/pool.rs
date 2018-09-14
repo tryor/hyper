@@ -9,7 +9,7 @@ use futures::sync::oneshot;
 #[cfg(feature = "runtime")]
 use tokio_timer::Interval;
 
-use common::Exec;
+use crate::common::Exec;
 use super::Ver;
 
 pub(super) struct Pool<T> {
@@ -74,7 +74,7 @@ struct Connections<T> {
     // A oneshot channel is used to allow the interval to be notified when
     // the Pool completely drops. That way, the interval can cancel immediately.
     #[cfg(feature = "runtime")]
-    idle_interval_ref: Option<oneshot::Sender<::common::Never>>,
+    idle_interval_ref: Option<oneshot::Sender<crate::common::Never>>,
     #[cfg(feature = "runtime")]
     exec: Exec,
     timeout: Option<Duration>,
@@ -600,7 +600,7 @@ pub(super) struct Checkout<T> {
 }
 
 impl<T: Poolable> Checkout<T> {
-    fn poll_waiter(&mut self) -> Poll<Option<Pooled<T>>, ::Error> {
+    fn poll_waiter(&mut self) -> Poll<Option<Pooled<T>>, crate::Error> {
         static CANCELED: &str = "pool checkout failed";
         if let Some(mut rx) = self.waiter.take() {
             match rx.poll() {
@@ -608,14 +608,14 @@ impl<T: Poolable> Checkout<T> {
                     if value.is_open() {
                         Ok(Async::Ready(Some(self.pool.reuse(&self.key, value))))
                     } else {
-                        Err(::Error::new_canceled(Some(CANCELED)))
+                        Err(crate::Error::new_canceled(Some(CANCELED)))
                     }
                 },
                 Ok(Async::NotReady) => {
                     self.waiter = Some(rx);
                     Ok(Async::NotReady)
                 },
-                Err(_canceled) => Err(::Error::new_canceled(Some(CANCELED))),
+                Err(_canceled) => Err(crate::Error::new_canceled(Some(CANCELED))),
             }
         } else {
             Ok(Async::Ready(None))
@@ -634,7 +634,7 @@ impl<T: Poolable> Checkout<T> {
 
 impl<T: Poolable> Future for Checkout<T> {
     type Item = Pooled<T>;
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         if let Some(pooled) = try_ready!(self.poll_waiter()) {
@@ -705,7 +705,7 @@ struct IdleInterval<T> {
     // This allows the IdleInterval to be notified as soon as the entire
     // Pool is fully dropped, and shutdown. This channel is never sent on,
     // but Err(Canceled) will be received when the Pool is dropped.
-    pool_drop_notifier: oneshot::Receiver<::common::Never>,
+    pool_drop_notifier: oneshot::Receiver<crate::common::Never>,
 }
 
 #[cfg(feature = "runtime")]
@@ -765,7 +765,7 @@ mod tests {
     use std::time::Duration;
     use futures::{Async, Future};
     use futures::future;
-    use common::Exec;
+    use crate::common::Exec;
     use super::{Connecting, Key, Poolable, Pool, Reservation, Ver, WeakOpt};
 
     /// Test unique reservations.

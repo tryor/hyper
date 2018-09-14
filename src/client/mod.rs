@@ -89,9 +89,9 @@ use http::{Method, Request, Response, Uri, Version};
 use http::header::{Entry, HeaderValue, HOST};
 use http::uri::Scheme;
 
-use body::{Body, Payload};
-use common::Exec;
-use common::lazy as hyper_lazy;
+use crate::body::{Body, Payload};
+use crate::common::Exec;
+use crate::common::lazy as hyper_lazy;
 use self::connect::{Connect, Destination};
 use self::pool::{Pool, Poolable, Reservation};
 
@@ -199,7 +199,7 @@ where C: Connect + Sync + 'static,
             Version::HTTP_10 => false,
             other => {
                 error!("Request has unsupported version \"{:?}\"", other);
-                return ResponseFuture::new(Box::new(future::err(::Error::new_user_unsupported_version())));
+                return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_unsupported_version())));
             }
         };
 
@@ -207,7 +207,7 @@ where C: Connect + Sync + 'static,
 
         if !is_http_11 && is_http_connect {
             debug!("client does not support CONNECT requests for {:?}", req.version());
-            return ResponseFuture::new(Box::new(future::err(::Error::new_user_unsupported_request_method())));
+            return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_unsupported_request_method())));
         }
 
 
@@ -231,7 +231,7 @@ where C: Connect + Sync + 'static,
             },
             _ => {
                 debug!("Client requires absolute-form URIs, received: {:?}", uri);
-                return ResponseFuture::new(Box::new(future::err(::Error::new_user_absolute_uri_required())))
+                return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_absolute_uri_required())))
             }
         };
 
@@ -278,7 +278,7 @@ where C: Connect + Sync + 'static,
             hyper_lazy(move || {
                 if let Some(connecting) = pool.connecting(&pool_key) {
                     Either::A(connector.connect(dst)
-                        .map_err(::Error::new_connect)
+                        .map_err(crate::Error::new_connect)
                         .and_then(move |(io, connected)| {
                             conn::Builder::new()
                                 .exec(executor.clone())
@@ -313,7 +313,7 @@ where C: Connect + Sync + 'static,
                                 })
                         }))
                 } else {
-                    let canceled = ::Error::new_canceled(Some("HTTP/2 connection in progress"));
+                    let canceled = crate::Error::new_canceled(Some("HTTP/2 connection in progress"));
                     Either::B(future::err(canceled))
                 }
             })
@@ -514,11 +514,11 @@ impl<C, B> fmt::Debug for Client<C, B> {
 /// A `Future` that will resolve to an HTTP Response.
 #[must_use = "futures do nothing unless polled"]
 pub struct ResponseFuture {
-    inner: Box<Future<Item=Response<Body>, Error=::Error> + Send>,
+    inner: Box<Future<Item=Response<Body>, Error=crate::Error> + Send>,
 }
 
 impl ResponseFuture {
-    fn new(fut: Box<Future<Item=Response<Body>, Error=::Error> + Send>) -> Self {
+    fn new(fut: Box<Future<Item=Response<Body>, Error=crate::Error> + Send>) -> Self {
         Self {
             inner: fut,
         }
@@ -533,7 +533,7 @@ impl fmt::Debug for ResponseFuture {
 
 impl Future for ResponseFuture {
     type Item = Response<Body>;
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.inner.poll()
@@ -561,7 +561,7 @@ where
     B::Data: Send,
 {
     type Item = Response<Body>;
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
@@ -600,7 +600,7 @@ enum PoolTx<B> {
 }
 
 impl<B> PoolClient<B> {
-    fn poll_ready(&mut self) -> Poll<(), ::Error> {
+    fn poll_ready(&mut self) -> Poll<(), crate::Error> {
         match self.tx {
             PoolTx::Http1(ref mut tx) => tx.poll_ready(),
             PoolTx::Http2(_) => Ok(Async::Ready(())),
@@ -623,7 +623,7 @@ impl<B> PoolClient<B> {
 }
 
 impl<B: Payload + 'static> PoolClient<B> {
-    fn send_request_retryable(&mut self, req: Request<B>) -> impl_trait!(ty: Future<Item = Response<Body>, Error = (::Error, Option<Request<B>>)> + Send)
+    fn send_request_retryable(&mut self, req: Request<B>) -> impl_trait!(ty: Future<Item = Response<Body>, Error = (crate::Error, Option<Request<B>>)> + Send)
     where
         B: Send,
     {
@@ -669,11 +669,11 @@ where
 }
 
 enum ClientError<B> {
-    Normal(::Error),
+    Normal(crate::Error),
     Canceled {
         connection_reused: bool,
         req: Request<B>,
-        reason: ::Error,
+        reason: crate::Error,
     }
 }
 

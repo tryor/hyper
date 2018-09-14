@@ -1,3 +1,4 @@
+//#![feature(rust_2018_preview)]
 #![doc(html_root_url = "https://docs.rs/hyper/0.12.9")]
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
@@ -47,10 +48,10 @@ pub use http::{
     Version,
 };
 
-pub use client::Client;
-pub use error::{Result, Error};
-pub use body::{Body, Chunk};
-pub use server::Server;
+pub use crate::client::Client;
+pub use crate::error::{Result, Error};
+pub use crate::body::{Body, Chunk};
+pub use crate::server::Server;
 
 #[macro_use]
 mod common;

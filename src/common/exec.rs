@@ -13,7 +13,7 @@ pub(crate) enum Exec {
 
 
 impl Exec {
-    pub(crate) fn execute<F>(&self, fut: F) -> ::Result<()>
+    pub(crate) fn execute<F>(&self, fut: F) -> crate::Result<()>
     where
         F: Future<Item=(), Error=()> + Send + 'static,
     {
@@ -26,7 +26,7 @@ impl Exec {
                         .spawn(Box::new(fut))
                         .map_err(|err| {
                             warn!("executor error: {:?}", err);
-                            ::Error::new_execute()
+                            crate::Error::new_execute()
                         })
                 }
                 #[cfg(not(feature = "runtime"))]
@@ -39,7 +39,7 @@ impl Exec {
                 e.execute(Box::new(fut))
                     .map_err(|err| {
                         warn!("executor error: {:?}", err.kind());
-                        ::Error::new_execute()
+                        crate::Error::new_execute()
                     })
             },
         }

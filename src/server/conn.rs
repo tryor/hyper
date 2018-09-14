@@ -20,13 +20,13 @@ use futures::future::{Either, Executor};
 use tokio_io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "runtime")] use tokio_reactor::Handle;
 
-use body::{Body, Payload};
-use common::Exec;
-use common::io::Rewind;
-use error::{Kind, Parse};
-use proto;
-use service::{NewService, Service};
-use upgrade::Upgraded;
+use crate::body::{Body, Payload};
+use crate::common::Exec;
+use crate::common::io::Rewind;
+use crate::error::{Kind, Parse};
+use crate::proto;
+use crate::service::{NewService, Service};
+use crate::upgrade::Upgraded;
 
 use self::upgrades::UpgradeableConnection;
 
@@ -316,7 +316,7 @@ impl Http {
     /// `new_service` object provided, creating a new service per
     /// connection.
     #[cfg(feature = "runtime")]
-    pub fn serve_addr<S, Bd>(&self, addr: &SocketAddr, new_service: S) -> ::Result<Serve<AddrIncoming, S>>
+    pub fn serve_addr<S, Bd>(&self, addr: &SocketAddr, new_service: S) -> crate::Result<Serve<AddrIncoming, S>>
     where
         S: NewService<ReqBody=Body, ResBody=Bd>,
         S::Error: Into<Box<::std::error::Error + Send + Sync>>,
@@ -336,7 +336,7 @@ impl Http {
     /// `new_service` object provided, creating a new service per
     /// connection.
     #[cfg(feature = "runtime")]
-    pub fn serve_addr_handle<S, Bd>(&self, addr: &SocketAddr, handle: &Handle, new_service: S) -> ::Result<Serve<AddrIncoming, S>>
+    pub fn serve_addr_handle<S, Bd>(&self, addr: &SocketAddr, handle: &Handle, new_service: S) -> crate::Result<Serve<AddrIncoming, S>>
     where
         S: NewService<ReqBody=Body, ResBody=Bd>,
         S::Error: Into<Box<::std::error::Error + Send + Sync>>,
@@ -431,7 +431,7 @@ where
     /// upgrade. Once the upgrade is completed, the connection would be "done",
     /// but it is not desired to actally shutdown the IO object. Instead you
     /// would take it back using `into_parts`.
-    pub fn poll_without_shutdown(&mut self) -> Poll<(), ::Error> {
+    pub fn poll_without_shutdown(&mut self) -> Poll<(), crate::Error> {
         loop {
             let polled = match *self.conn.as_mut().unwrap() {
                 Either::A(ref mut h1) => h1.poll_without_shutdown(),
@@ -495,7 +495,7 @@ where
     B: Payload + 'static,
 {
     type Item = ();
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
@@ -567,10 +567,10 @@ where
     B: Payload,
 {
     type Item = Connecting<I::Item, S::Future>;
-    type Error = ::Error;
+    type Error = crate::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if let Some(io) = try_ready!(self.incoming.poll().map_err(::Error::new_accept)) {
+        if let Some(io) = try_ready!(self.incoming.poll().map_err(crate::Error::new_accept)) {
             let new_fut = self.new_service.new_service();
             Ok(Async::Ready(Some(Connecting {
                 future: new_fut,
@@ -630,17 +630,17 @@ where
     <S::Service as Service>::Future: Send + 'static,
     B: Payload,
 {
-    pub(super) fn poll_with<F1, F2, R>(&mut self, per_connection: F1) -> Poll<(), ::Error>
+    pub(super) fn poll_with<F1, F2, R>(&mut self, per_connection: F1) -> Poll<(), crate::Error>
     where
         F1: Fn() -> F2,
         F2: FnOnce(UpgradeableConnection<I::Item, S::Service>) -> R + Send + 'static,
-        R: Future<Item=(), Error=::Error> + Send + 'static,
+        R: Future<Item=(), Error=crate::Error> + Send + 'static,
     {
         loop {
             if let Some(connecting) = try_ready!(self.serve.poll()) {
                 let and_then = per_connection();
                 let fut = connecting
-                    .map_err(::Error::new_user_new_service)
+                    .map_err(crate::Error::new_user_new_service)
                     // flatten basically
                     .and_then(|conn| and_then(conn.with_upgrades()))
                     .map_err(|err| debug!("conn error: {}", err));
@@ -694,7 +694,7 @@ mod upgrades {
         B: Payload + 'static,
     {
         type Item = ();
-        type Error = ::Error;
+        type Error = crate::Error;
 
         fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
             loop {
