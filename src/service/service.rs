@@ -2,10 +2,13 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::marker::PhantomData;
 
-use futures::{future, Future, IntoFuture};
+//use futures::{future, Future, IntoFuture};
+use futures_preview::{
+    Future as Future03,
+};
 
 use crate::body::Payload;
-use crate::common::Never;
+//use crate::common::Never;
 use crate::{Request, Response};
 
 /// An asynchronous function from `Request` to `Response`.
@@ -24,7 +27,9 @@ pub trait Service {
     type Error: Into<Box<StdError + Send + Sync>>;
 
     /// The `Future` returned by this `Service`.
-    type Future: Future<Item=Response<Self::ResBody>, Error=Self::Error>;
+    //type Future: Future<Item=Response<Self::ResBody>, Error=Self::Error>;
+    type Future: Future03<Output=Result<Response<Self::ResBody>, Self::Error>>;
+
 
     /// Calls this `Service` with a request, returning a `Future` of the response.
     fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future;
@@ -52,7 +57,7 @@ pub trait Service {
 pub fn service_fn<F, R, S>(f: F) -> ServiceFn<F, R>
 where
     F: Fn(Request<R>) -> S,
-    S: IntoFuture,
+//    S: IntoFuture,
 {
     ServiceFn {
         f,
@@ -60,6 +65,7 @@ where
     }
 }
 
+/*
 /// Create a `Service` from a function that never errors.
 ///
 /// # Example
@@ -83,6 +89,7 @@ where
         _req: PhantomData,
     }
 }
+*/
 
 // Not exported from crate as this will likely be replaced with `impl Service`.
 pub struct ServiceFn<F, R> {
@@ -90,24 +97,27 @@ pub struct ServiceFn<F, R> {
     _req: PhantomData<fn(R)>,
 }
 
-impl<F, ReqBody, Ret, ResBody> Service for ServiceFn<F, ReqBody>
+impl<F, ReqBody, Ret, E, ResBody> Service for ServiceFn<F, ReqBody>
 where
     F: Fn(Request<ReqBody>) -> Ret,
     ReqBody: Payload,
-    Ret: IntoFuture<Item=Response<ResBody>>,
-    Ret::Error: Into<Box<StdError + Send + Sync>>,
+    //Ret: TryFuture<Ok=Response<ResBody>>,
+    Ret: Future03<Output=Result<Response<ResBody>, E>>,
+    //Ret::Error: Into<Box<StdError + Send + Sync>>,
+    E: Into<Box<StdError + Send + Sync>>,
     ResBody: Payload,
 {
     type ReqBody = ReqBody;
     type ResBody = ResBody;
-    type Error = Ret::Error;
-    type Future = Ret::Future;
+    type Error = E; //Ret::Error;
+    type Future = Ret;
 
     fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
-        (self.f)(req).into_future()
+        (self.f)(req)//.into_future()
     }
 }
 
+/*
 impl<F, R> IntoFuture for ServiceFn<F, R> {
     type Future = future::FutureResult<Self::Item, Self::Error>;
     type Item = Self;
@@ -117,6 +127,7 @@ impl<F, R> IntoFuture for ServiceFn<F, R> {
         future::ok(self)
     }
 }
+*/
 
 impl<F, R> fmt::Debug for ServiceFn<F, R> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -125,6 +136,7 @@ impl<F, R> fmt::Debug for ServiceFn<F, R> {
     }
 }
 
+/*
 // Not exported from crate as this will likely be replaced with `impl Service`.
 pub struct ServiceFnOk<F, R> {
     f: F,
@@ -163,3 +175,4 @@ impl<F, R> fmt::Debug for ServiceFnOk<F, R> {
             .finish()
     }
 }
+*/
