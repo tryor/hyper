@@ -85,6 +85,15 @@ use std::time::Duration;
 use futures::{Async, Future, Poll};
 use futures::future::{self, Either, Executor};
 use futures::sync::oneshot;
+use futures_preview::{
+    Future as Future03,
+    //FutureExt,
+    //TryFutureExt,
+    compat::{
+        Future01CompatExt,
+        //TokioDefaultSpawner,
+    },
+};
 use http::{Method, Request, Response, Uri, Version};
 use http::header::{Entry, HeaderValue, HOST};
 use http::uri::Scheme;
@@ -178,7 +187,7 @@ where C: Connect + Sync + 'static,
     /// This requires that the `Payload` type have a `Default` implementation.
     /// It *should* return an "empty" version of itself, such that
     /// `Payload::is_end_stream` is `true`.
-    pub fn get(&self, uri: Uri) -> ResponseFuture
+    pub fn get(&self, uri: Uri) -> impl Future03<Output=crate::Result<Response<Body>>>//ResponseFuture
     where
         B: Default,
     {
@@ -193,13 +202,18 @@ where C: Connect + Sync + 'static,
     }
 
     /// Send a constructed Request using this Client.
-    pub fn request(&self, mut req: Request<B>) -> ResponseFuture {
-        let is_http_11 = self.ver == Ver::Http1 && match req.version() {
+    pub fn request(&self, mut req: Request<B>) -> impl Future03<Output=crate::Result<Response<Body>>> { //ResponseFuture {
+        let ver = self.ver;
+        let set_host = self.set_host;
+        let client = self.clone();
+        async move {
+        let is_http_11 = ver == Ver::Http1 && match req.version() {
             Version::HTTP_11 => true,
             Version::HTTP_10 => false,
             other => {
                 error!("Request has unsupported version \"{:?}\"", other);
-                return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_unsupported_version())));
+                //return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_unsupported_version())));
+                return Err(crate::Error::new_user_unsupported_version());
             }
         };
 
@@ -207,7 +221,8 @@ where C: Connect + Sync + 'static,
 
         if !is_http_11 && is_http_connect {
             debug!("client does not support CONNECT requests for {:?}", req.version());
-            return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_unsupported_request_method())));
+            //return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_unsupported_request_method())));
+            return Err(crate::Error::new_user_unsupported_request_method());
         }
 
 
@@ -231,11 +246,12 @@ where C: Connect + Sync + 'static,
             },
             _ => {
                 debug!("Client requires absolute-form URIs, received: {:?}", uri);
-                return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_absolute_uri_required())))
+                //return ResponseFuture::new(Box::new(future::err(crate::Error::new_user_absolute_uri_required())))
+                return Err(crate::Error::new_user_absolute_uri_required());
             }
         };
 
-        if self.set_host && self.ver == Ver::Http1 {
+        if set_host && ver == Ver::Http1 {
             if let Entry::Vacant(entry) = req.headers_mut().entry(HOST).expect("HOST is always valid header name") {
                 let hostname = uri.host().expect("authority implies host");
                 let host = if let Some(port) = uri.port() {
@@ -249,19 +265,42 @@ where C: Connect + Sync + 'static,
         }
 
 
-        let client = self.clone();
         let uri = req.uri().clone();
-        let fut = RetryableSendRequest {
+        loop {
+            match await!(client.send_request(req, &domain)) {
+                Ok(res) => return Ok(res),
+                Err(ClientError::Normal(err)) => return Err(err),
+                Err(ClientError::Canceled {
+                    connection_reused,
+                    req: mut orig_req,
+                    reason,
+                }) => {
+                    if !client.retry_canceled_requests || !connection_reused {
+                        // if client disabled, don't retry
+                        // a fresh connection means we definitely can't retry
+                        return Err(reason);
+                    }
+
+                    trace!("unstarted request canceled, trying again (reason={:?})", reason);
+                    *orig_req.uri_mut() = uri.clone();
+                    req = orig_req;
+                }
+            }
+        }
+        /*
+        await!(RetryableSendRequest {
             client: client,
-            future: self.send_request(req, &domain),
+            future: fut,
             domain: domain,
             uri: uri,
-        };
-        ResponseFuture::new(Box::new(fut))
+        }.compat())
+        //ResponseFuture::new(Box::new(fut))
+        */
+        }
     }
 
-    //TODO: replace with `impl Future` when stable
-    fn send_request(&self, mut req: Request<B>, domain: &str) -> Box<Future<Item=Response<Body>, Error=ClientError<B>> + Send> {
+    fn send_request(&self, mut req: Request<B>, domain: &str) -> impl Future03<Output=Result<Response<Body>, ClientError<B>>> {
+    //async fn send_request(&self, mut req: Request<B>, domain: &str) -> Result<Response<Body>, ClientError<B>> {
         let url = req.uri().clone();
         let ver = self.ver;
         let pool_key = (Arc::new(domain.to_string()), self.ver);
@@ -378,10 +417,13 @@ where C: Connect + Sync + 'static,
                         Either::B(future::err(ClientError::Normal(err)))
                     }
                 }
-            });
+            })
+            .compat();
 
         let executor = self.executor.clone();
-        let resp = race.and_then(move |mut pooled| {
+        async move {
+            let mut pooled = await!(race)?;
+        //let resp = race.and_then(move |mut pooled| {
             let conn_reused = pooled.is_reused();
             if ver == Ver::Http1 {
                 // CONNECT always sends origin-form, so check it first...
@@ -399,7 +441,7 @@ where C: Connect + Sync + 'static,
                 );
             }
 
-            let fut = pooled.send_request_retryable(req);
+            let fut = pooled.send_request_retryable(req).compat();
 
             // As of futures@0.1.21, there is a race condition in the mpsc
             // channel, such that sending when the receiver is closing can
@@ -410,21 +452,8 @@ where C: Connect + Sync + 'static,
             // has been closed after having tried to send. If so, error out...
             if pooled.is_closed() {
                 drop(pooled);
-                let fut = fut
-                    .map_err(move |(err, orig_req)| {
-                        if let Some(req) = orig_req {
-                            ClientError::Canceled {
-                                connection_reused: conn_reused,
-                                reason: err,
-                                req,
-                            }
-                        } else {
-                            ClientError::Normal(err)
-                        }
-                    });
-                Either::A(fut)
-            } else {
-                let fut = fut
+                //let fut = fut
+                await!(fut)
                     .map_err(move |(err, orig_req)| {
                         if let Some(req) = orig_req {
                             ClientError::Canceled {
@@ -436,56 +465,78 @@ where C: Connect + Sync + 'static,
                             ClientError::Normal(err)
                         }
                     })
-                    .and_then(move |mut res| {
-                        // If pooled is HTTP/2, we can toss this reference immediately.
-                        //
-                        // when pooled is dropped, it will try to insert back into the
-                        // pool. To delay that, spawn a future that completes once the
-                        // sender is ready again.
-                        //
-                        // This *should* only be once the related `Connection` has polled
-                        // for a new request to start.
-                        //
-                        // It won't be ready if there is a body to stream.
-                        if ver == Ver::Http2 || !pooled.is_pool_enabled() || pooled.is_ready() {
-                            drop(pooled);
-                        } else if !res.body().is_end_stream() {
-                            let (delayed_tx, delayed_rx) = oneshot::channel();
-                            res.body_mut().delayed_eof(delayed_rx);
-                            let on_idle = future::poll_fn(move || {
-                                pooled.poll_ready()
-                            })
-                                .then(move |_| {
-                                    // At this point, `pooled` is dropped, and had a chance
-                                    // to insert into the pool (if conn was idle)
-                                    drop(delayed_tx);
-                                    Ok(())
-                                });
-
-                            if let Err(err) = executor.execute(on_idle) {
-                                // This task isn't critical, so just log and ignore.
-                                warn!("error spawning task to insert idle connection: {}", err);
+                //await!(fut.compat())
+                /*
+                await!(Either::A(fut)
+                    .compat())
+                    */
+            } else {
+                //let fut = fut
+                let mut res = await!(fut)
+                    .map_err(move |(err, orig_req)| {
+                        if let Some(req) = orig_req {
+                            ClientError::Canceled {
+                                connection_reused: conn_reused,
+                                reason: err,
+                                req,
                             }
                         } else {
-                            // There's no body to delay, but the connection isn't
-                            // ready yet. Only re-insert when it's ready
-                            let on_idle = future::poll_fn(move || {
-                                pooled.poll_ready()
-                            })
-                                .then(|_| Ok(()));
-
-                            if let Err(err) = executor.execute(on_idle) {
-                                // This task isn't critical, so just log and ignore.
-                                warn!("error spawning task to insert idle connection: {}", err);
-                            }
+                            ClientError::Normal(err)
                         }
-                        Ok(res)
-                    });
-                Either::B(fut)
-            }
-        });
+                    })?;
 
-        Box::new(resp)
+                    // If pooled is HTTP/2, we can toss this reference immediately.
+                    //
+                    // when pooled is dropped, it will try to insert back into the
+                    // pool. To delay that, spawn a future that completes once the
+                    // sender is ready again.
+                    //
+                    // This *should* only be once the related `Connection` has polled
+                    // for a new request to start.
+                    //
+                    // It won't be ready if there is a body to stream.
+                    if ver == Ver::Http2 || !pooled.is_pool_enabled() || pooled.is_ready() {
+                        drop(pooled);
+                    } else if !res.body().is_end_stream() {
+                        let (delayed_tx, delayed_rx) = oneshot::channel();
+                        res.body_mut().delayed_eof(delayed_rx);
+                        let on_idle = future::poll_fn(move || {
+                            pooled.poll_ready()
+                        })
+                            .then(move |_| {
+                                // At this point, `pooled` is dropped, and had a chance
+                                // to insert into the pool (if conn was idle)
+                                drop(delayed_tx);
+                                Ok(())
+                            });
+
+                        if let Err(err) = executor.execute(on_idle) {
+                            // This task isn't critical, so just log and ignore.
+                            warn!("error spawning task to insert idle connection: {}", err);
+                        }
+                    } else {
+                        // There's no body to delay, but the connection isn't
+                        // ready yet. Only re-insert when it's ready
+                        let on_idle = future::poll_fn(move || {
+                            pooled.poll_ready()
+                        })
+                            .then(|_| Ok(()));
+
+                        if let Err(err) = executor.execute(on_idle) {
+                            // This task isn't critical, so just log and ignore.
+                            warn!("error spawning task to insert idle connection: {}", err);
+                        }
+                    }
+                    Ok(res)
+                    /*
+                await!(Either::B(fut)
+                    .compat())
+                    */
+            }
+        //});
+        }
+
+        //resp
     }
 }
 
@@ -511,6 +562,7 @@ impl<C, B> fmt::Debug for Client<C, B> {
     }
 }
 
+/*
 /// A `Future` that will resolve to an HTTP Response.
 #[must_use = "futures do nothing unless polled"]
 pub struct ResponseFuture {
@@ -539,7 +591,9 @@ impl Future for ResponseFuture {
         self.inner.poll()
     }
 }
+*/
 
+/*
 struct RetryableSendRequest<C, B> {
     client: Client<C, B>,
     domain: String,
@@ -588,6 +642,7 @@ where
         }
     }
 }
+*/
 
 struct PoolClient<B> {
     is_proxied: bool,

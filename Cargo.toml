@@ -1,3 +1,5 @@
+cargo-features = ["rename-dependency"]
+
 [package]
 name = "hyper"
 version = "0.12.9" # don't forget to update html_root_url
@@ -21,6 +23,7 @@ include = [
 [dependencies]
 bytes = "0.4.4"
 futures = "0.1.21"
+futures_preview = { version = "0.3.0-alpha.6", package = "futures-preview", features = ["compat", "tokio-compat"] }
 futures-cpupool = { version = "0.1.6", optional = true }
 http = "0.1.13"
 httparse = "1.0"

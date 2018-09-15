@@ -1,7 +1,7 @@
-//#![feature(rust_2018_preview)]
+#![feature(futures_api, async_await, await_macro)]
 #![doc(html_root_url = "https://docs.rs/hyper/0.12.9")]
 #![deny(missing_docs)]
-#![deny(missing_debug_implementations)]
+//#![deny(missing_debug_implementations)]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(all(test, feature = "nightly"), feature(test))]
 
@@ -17,6 +17,7 @@
 
 extern crate bytes;
 #[macro_use] extern crate futures;
+extern crate futures_preview;
 #[cfg(feature = "runtime")] extern crate futures_cpupool;
 extern crate h2;
 extern crate http;
