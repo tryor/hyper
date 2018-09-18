@@ -1,4 +1,10 @@
 use futures::{Async, Future, Poll, Stream};
+use futures_preview::{
+    TryFutureExt,
+    compat::{
+        TokioDefaultSpawner,
+    }
+};
 use h2::Reason;
 use h2::server::{Builder, Connection, Handshake, SendResponse};
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -131,7 +137,7 @@ where
             let req = req.map(|stream| {
                 crate::Body::h2(stream, content_length)
             });
-            let fut = H2Stream::new(service.call(req), respond);
+            let fut = H2Stream::new(service.call(req).compat(TokioDefaultSpawner), respond);
             exec.execute(fut)?;
         }
 

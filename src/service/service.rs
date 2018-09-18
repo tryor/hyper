@@ -1,6 +1,6 @@
 use std::error::Error as StdError;
 use std::fmt;
-use std::marker::PhantomData;
+use std::marker::{PhantomData, Unpin};
 
 //use futures::{future, Future, IntoFuture};
 use futures_preview::{
@@ -28,7 +28,7 @@ pub trait Service {
 
     /// The `Future` returned by this `Service`.
     //type Future: Future<Item=Response<Self::ResBody>, Error=Self::Error>;
-    type Future: Future03<Output=Result<Response<Self::ResBody>, Self::Error>>;
+    type Future: Future03<Output=Result<Response<Self::ResBody>, Self::Error>> + Unpin;
 
 
     /// Calls this `Service` with a request, returning a `Future` of the response.
@@ -102,7 +102,7 @@ where
     F: Fn(Request<ReqBody>) -> Ret,
     ReqBody: Payload,
     //Ret: TryFuture<Ok=Response<ResBody>>,
-    Ret: Future03<Output=Result<Response<ResBody>, E>>,
+    Ret: Future03<Output=Result<Response<ResBody>, E>> + Unpin,
     //Ret::Error: Into<Box<StdError + Send + Sync>>,
     E: Into<Box<StdError + Send + Sync>>,
     ResBody: Payload,

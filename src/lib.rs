@@ -1,4 +1,4 @@
-#![feature(futures_api, async_await, await_macro)]
+#![feature(futures_api, async_await, await_macro, pin)]
 #![doc(html_root_url = "https://docs.rs/hyper/0.12.9")]
 #![deny(missing_docs)]
 //#![deny(missing_debug_implementations)]

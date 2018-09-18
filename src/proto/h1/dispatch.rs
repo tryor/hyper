@@ -1,5 +1,11 @@
 use bytes::{Buf, Bytes};
 use futures::{Async, Future, Poll, Stream};
+use futures_preview::{
+    TryFutureExt,
+    compat::{
+        TokioDefaultSpawner,
+    }
+};
 use http::{Request, Response, StatusCode};
 use tokio_io::{AsyncRead, AsyncWrite};
 
@@ -30,7 +36,7 @@ pub(crate) trait Dispatch {
 }
 
 pub struct Server<S: Service> {
-    in_flight: Option<S::Future>,
+    in_flight: Option<futures_preview::compat::Compat<S::Future, TokioDefaultSpawner>>,
     pub(crate) service: S,
 }
 
@@ -402,7 +408,7 @@ where
         *req.uri_mut() = msg.subject.1;
         *req.headers_mut() = msg.headers;
         *req.version_mut() = msg.version;
-        self.in_flight = Some(self.service.call(req));
+        self.in_flight = Some(self.service.call(req).compat(TokioDefaultSpawner));
         Ok(())
     }
 
