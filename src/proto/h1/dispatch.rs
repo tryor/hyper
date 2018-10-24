@@ -4,7 +4,7 @@ use http::{Request, Response, StatusCode};
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use body::{Body, Payload};
-use body::internal::FullDataArg;
+//use body::internal::FullDataArg;
 use common::Never;
 use proto::{BodyLength, DecodedLength, Conn, Dispatched, MessageHead, RequestHead, RequestLine, ResponseHead};
 use super::Http1Transaction;
@@ -234,30 +234,7 @@ where
             if self.is_closing {
                 return Ok(Async::Ready(()));
             } else if self.body_rx.is_none() && self.conn.can_write_head() && self.dispatch.should_poll() {
-                if let Some((head, mut body)) = try_ready!(self.dispatch.poll_msg().map_err(::Error::new_user_service)) {
-                    // Check if the body knows its full data immediately.
-                    //
-                    // If so, we can skip a bit of bookkeeping that streaming
-                    // bodies need to do.
-                    if let Some(full) = body.__hyper_full_data(FullDataArg(())).0 {
-                        self.conn.write_full_msg(head, full);
-                        return Ok(Async::Ready(()));
-                    }
-                    let body_type = if body.is_end_stream() {
-                        self.body_rx = None;
-                        None
-                    } else {
-                        let btype = body.content_length()
-                            .map(BodyLength::Known)
-                            .or_else(|| Some(BodyLength::Unknown));
-                        self.body_rx = Some(body);
-                        btype
-                    };
-                    self.conn.write_head(head, body_type);
-                } else {
-                    self.close();
-                    return Ok(Async::Ready(()));
-                }
+                try_ready!(self.poll_write_message());
             } else if !self.conn.can_buffer_body() {
                 try_ready!(self.poll_flush());
             } else if let Some(mut body) = self.body_rx.take() {
@@ -299,6 +276,89 @@ where
                 return Ok(Async::NotReady);
             }
         }
+    }
+
+    /// Try to write the start of an HTTP message.
+    fn poll_write_message(&mut self) -> Poll<(), ::Error> {
+        debug_assert!(
+            self.body_rx.is_none()
+            && self.conn.can_write_head()
+            && self.dispatch.should_poll(),
+            "can call poll_write_message"
+        );
+
+        let msg = try_ready!(self.dispatch.poll_msg().map_err(::Error::new_user_service));
+
+        let (head, mut body) = match msg {
+            Some(msg) => msg,
+            None => {
+                self.close();
+                return Ok(Async::Ready(()));
+            }
+        };
+
+        match body.poll_data().map_err(::Error::new_user_body)? {
+            Async::Ready(Some(chunk)) => {
+                if body.is_end_stream() {
+                    trace!("full body available, using write_full_msg");
+                    self.conn.write_full_msg(head, chunk);
+                } else {
+                    let btype = body.content_length()
+                        .map(BodyLength::Known)
+                        .or_else(|| Some(BodyLength::Unknown));
+
+                    self.conn.write_head(head, btype);
+
+                    if self.conn.can_write_body() {
+                        self.body_rx = Some(body);
+                        if chunk.remaining() == 0 {
+                            trace!("discarding empty chunk");
+                        } else {
+                            self.conn.write_body(chunk);
+                        }
+                    } else {
+                        trace!(
+                            "no more write body allowed, but body had data = {}",
+                            chunk.remaining()
+                        );
+                    }
+
+                }
+            },
+            Async::Ready(None) => {
+                self.conn.write_head(head, None);
+            },
+            Async::NotReady => {
+                let btype = body.content_length()
+                    .map(BodyLength::Known)
+                    .or_else(|| Some(BodyLength::Unknown));
+                self.body_rx = Some(body);
+
+                self.conn.write_head(head, btype);
+            },
+        }
+        /*
+        // Check if the body knows its full data immediately.
+        //
+        // If so, we can skip a bit of bookkeeping that streaming
+        // bodies need to do.
+        if let Some(full) = body.__hyper_full_data(FullDataArg(())).0 {
+            self.conn.write_full_msg(head, full);
+            return Ok(Async::Ready(()));
+        }
+        let body_type = if body.is_end_stream() {
+            self.body_rx = None;
+            None
+        } else {
+            let btype = body.content_length()
+                .map(BodyLength::Known)
+                .or_else(|| Some(BodyLength::Unknown));
+            self.body_rx = Some(body);
+            btype
+        };
+        self.conn.write_head(head, body_type);
+        */
+        Ok(Async::Ready(()))
     }
 
     fn poll_flush(&mut self) -> Poll<(), ::Error> {
