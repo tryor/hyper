@@ -561,6 +561,7 @@ impl<C, B> fmt::Debug for Client<C, B> {
     }
 }
 
+
 /// A `Future` that will resolve to an HTTP Response.
 #[must_use = "futures do nothing unless polled"]
 pub struct ResponseFuture {
@@ -568,7 +569,9 @@ pub struct ResponseFuture {
 }
 
 impl ResponseFuture {
-    fn new(fut: Box<Future<Item=Response<Body>, Error=::Error> + Send>) -> Self {
+    
+    /// new ResponseFuture
+    pub fn new(fut: Box<Future<Item=Response<Body>, Error=::Error> + Send>) -> Self {
         Self {
             inner: fut,
         }
