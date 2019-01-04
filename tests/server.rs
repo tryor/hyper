@@ -14,7 +14,7 @@ use std::net::{TcpStream, Shutdown, SocketAddr};
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 use std::net::{TcpListener as StdTcpListener};
 use std::thread;
 use std::time::Duration;
@@ -701,7 +701,7 @@ fn header_connection_close() {
 }
 
 #[test]
-fn expect_continue() {
+fn expect_continue_sends_100() {
     let server = serve();
     let mut req = connect(server.addr());
     server.reply();
@@ -989,6 +989,71 @@ fn nonempty_parse_eof_returns_error() {
         });
 
     rt.block_on(fut).expect_err("partial parse eof is error");
+}
+
+#[test]
+fn socket_half_closed() {
+    let _ = pretty_env_logger::try_init();
+    let mut rt = Runtime::new().unwrap();
+    let listener = tcp_bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    thread::spawn(move || {
+        let mut tcp = connect(&addr);
+        tcp.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
+        tcp.shutdown(::std::net::Shutdown::Write).expect("SHDN_WR");
+
+        let mut buf = [0; 256];
+        tcp.read(&mut buf).unwrap();
+        let expected = "HTTP/1.1 200 OK\r\n";
+        assert_eq!(s(&buf[..expected.len()]), expected);
+    });
+
+    let fut = listener.incoming()
+        .into_future()
+        .map_err(|_| unreachable!())
+        .and_then(|(item, _incoming)| {
+            let socket = item.unwrap();
+            Http::new()
+                .serve_connection(socket, service_fn(|_| {
+                    Delay::new(Duration::from_millis(500))
+                        .map(|_| {
+                            Response::new(Body::empty())
+                        })
+                }))
+        });
+
+    rt.block_on(fut).unwrap();
+}
+
+#[test]
+fn disconnect_after_reading_request_before_responding() {
+    let _ = pretty_env_logger::try_init();
+    let mut rt = Runtime::new().unwrap();
+    let listener = tcp_bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    thread::spawn(move || {
+        let mut tcp = connect(&addr);
+        tcp.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
+    });
+
+    let fut = listener.incoming()
+        .into_future()
+        .map_err(|_| unreachable!())
+        .and_then(|(item, _incoming)| {
+            let socket = item.unwrap();
+            Http::new()
+                .http1_half_close(false)
+                .serve_connection(socket, service_fn(|_| {
+                    Delay::new(Duration::from_secs(2))
+                        .map(|_| -> Response<Body> {
+                            panic!("response future should have been dropped");
+                        })
+                }))
+        });
+
+    rt.block_on(fut).expect_err("socket disconnected");
 }
 
 #[test]
@@ -1590,7 +1655,7 @@ impl Drop for Serve {
 
 #[derive(Clone)]
 struct TestService {
-    tx: Arc<Mutex<mpsc::Sender<Msg>>>,
+    tx: mpsc::Sender<Msg>,
     reply: spmc::Receiver<Reply>,
 }
 
@@ -1605,50 +1670,51 @@ enum Reply {
 
 #[derive(Debug)]
 enum Msg {
-    //Head(Request),
     Chunk(Vec<u8>),
     Error(hyper::Error),
     End,
 }
 
 impl TestService {
-    // Box is needed until we can return `impl Future` from a fn
     fn call(&self, req: Request<Body>) -> Box<Future<Item=Response<Body>, Error=hyper::Error> + Send> {
         let tx1 = self.tx.clone();
         let tx2 = self.tx.clone();
-
         let replies = self.reply.clone();
         Box::new(req.into_body().for_each(move |chunk| {
-            tx1.lock().unwrap().send(Msg::Chunk(chunk.to_vec())).unwrap();
+            tx1.send(Msg::Chunk(chunk.to_vec())).unwrap();
             Ok(())
         }).then(move |result| {
             let msg = match result {
                 Ok(()) => Msg::End,
                 Err(e) => Msg::Error(e),
             };
-            tx2.lock().unwrap().send(msg).unwrap();
+            tx2.send(msg).unwrap();
             Ok(())
         }).map(move |_| {
-            let mut res = Response::new(Body::empty());
-            while let Ok(reply) = replies.try_recv() {
-                match reply {
-                    Reply::Status(s) => {
-                        *res.status_mut() = s;
-                    },
-                    Reply::Version(v) => {
-                        *res.version_mut() = v;
-                    },
-                    Reply::Header(name, value) => {
-                        res.headers_mut().insert(name, value);
-                    },
-                    Reply::Body(body) => {
-                        *res.body_mut() = body;
-                    },
-                    Reply::End => break,
-                }
-            }
-            res
+            TestService::build_reply(replies)
         }))
+    }
+
+    fn build_reply(replies: spmc::Receiver<Reply>) -> Response<Body> {
+        let mut res = Response::new(Body::empty());
+        while let Ok(reply) = replies.try_recv() {
+            match reply {
+                Reply::Status(s) => {
+                    *res.status_mut() = s;
+                },
+                Reply::Version(v) => {
+                    *res.version_mut() = v;
+                },
+                Reply::Header(name, value) => {
+                    res.headers_mut().insert(name, value);
+                },
+                Reply::Body(body) => {
+                    *res.body_mut() = body;
+                },
+                Reply::End => break,
+            }
+        }
+        res
     }
 }
 
@@ -1741,7 +1807,7 @@ impl ServeOptions {
                 .http1_pipeline_flush(options.pipeline)
                 .serve(move || {
                     let ts = TestService {
-                        tx: Arc::new(Mutex::new(msg_tx.clone())),
+                        tx: msg_tx.clone(),
                         reply: reply_rx.clone(),
                     };
                     service_fn(move |req| ts.call(req))

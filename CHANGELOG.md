@@ -1,3 +1,56 @@
+### v0.12.19 (2018-12-18)
+
+
+#### Bug Fixes
+
+* **rt:** prevent fallback reactor thread from being created accidentally ([1d253b4d](https://github.com/hyperium/hyper/commit/1d253b4d4759e045409fcf140adda7d327a05c8a))
+
+
+### v0.12.18 (2018-12-11)
+
+
+#### Features
+
+* **server:** add `server::conn::AddrIncoming::bind` constructor ([2d5eabde](https://github.com/hyperium/hyper/commit/2d5eabdeed06ea1c88d88dff464929616710ee9a))
+
+
+### v0.12.17 (2018-12-05)
+
+
+#### Features
+
+* **error:** add `Error::is_connect` method ([01f64983](https://github.com/hyperium/hyper/commit/01f64983559602b9ebaaeecf6d33e97a88185676))
+* **server:**
+  * add `tcp_sleep_on_accept_errors` builder method ([a6fff13a](https://github.com/hyperium/hyper/commit/a6fff13a392d3394cacb1215f83bd8ec87671566), closes [#1713](https://github.com/hyperium/hyper/issues/1713))
+  * add `http1_half_close(bool)` option ([73345be6](https://github.com/hyperium/hyper/commit/73345be65f895660492e28e718786b66034a4d03), closes [#1716](https://github.com/hyperium/hyper/issues/1716))
+* **service:** export `hyper::service::MakeServiceRef` ([a522c315](https://github.com/hyperium/hyper/commit/a522c3151abd11795d3263f6607a7caf7c19a585))
+
+#### Performance
+
+* **http1:** implement an adaptive read buffer strategy which helps with throughput and memory management ([fd25129d](https://github.com/hyperium/hyper/commit/fd25129dc0e543538ccbd1794d22014bc187e050), closes [#1708](https://github.com/hyperium/hyper/issues/1708))
+
+### v0.12.16 (2018-11-21)
+
+
+#### Bug Fixes
+
+* **client:** fix connection leak when Response finishes before Request body ([e455fa24](https://github.com/hyperium/hyper/commit/e455fa2452cf45d66de6b4c3dc567e2b5d2368a4), closes [#1717](https://github.com/hyperium/hyper/issues/1717))
+
+
+#### Features
+
+* **client:** add `http1_read_buf_exact_size` Builder option ([2e7250b6](https://github.com/hyperium/hyper/commit/2e7250b6698407b97961b8fcae78696e94d6ea57))
+
+
+### v0.12.15 (2018-11-20)
+
+
+#### Features
+
+* **client:** add client::conn::Builder::executor method ([95446cc3](https://github.com/hyperium/hyper/commit/95446cc338f8055539dd3503c482d649f42a531c))
+* **server:** change `NewService` to `MakeService` with connection context ([30870029](https://github.com/hyperium/hyper/commit/30870029b9eb162f566d8dddd007fb6df9cd69af), closes [#1650](https://github.com/hyperium/hyper/issues/1650))
+
+
 ### v0.12.14 (2018-11-07)
 
 

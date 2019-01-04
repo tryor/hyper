@@ -11,7 +11,7 @@
 //! # Server
 //!
 //! The [`Server`](Server) is main way to start listening for HTTP requests.
-//! It wraps a listener with a [`NewService`](::service), and then should
+//! It wraps a listener with a [`MakeService`](::service), and then should
 //! be executed to start serving requests.
 //!
 //! [`Server`](Server) accepts connections in both HTTP1 and HTTP2 by default.
@@ -30,8 +30,8 @@
 //!     // Construct our SocketAddr to listen on...
 //!     let addr = ([127, 0, 0, 1], 3000).into();
 //!
-//!     // And a NewService to handle each connection...
-//!     let new_service = || {
+//!     // And a MakeService to handle each connection...
+//!     let make_service = || {
 //!         service_fn_ok(|_req| {
 //!             Response::new(Body::from("Hello World"))
 //!         })
@@ -39,7 +39,7 @@
 //!
 //!     // Then bind and serve...
 //!     let server = Server::bind(&addr)
-//!         .serve(new_service);
+//!         .serve(make_service);
 //!
 //!     // Finally, spawn `server` onto an Executor...
 //!     hyper::rt::run(server.map_err(|e| {
@@ -65,7 +65,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 use body::{Body, Payload};
 use common::exec::{Exec, H2Exec, NewSvcExec};
-use service::{NewService, Service};
+use service::{MakeServiceRef, Service};
 // Renamed `Http` as `Http_` for now so that people upgrading don't see an
 // error that `hyper::server::Http` is private...
 use self::conn::{Http as Http_, NoopWatcher, SpawnAll};
@@ -125,7 +125,7 @@ impl Server<AddrIncoming, ()> {
 
     /// Create a new instance from a `std::net::TcpListener` instance.
     pub fn from_tcp(listener: StdTcpListener) -> Result<Builder<AddrIncoming>, ::Error> {
-        let handle = tokio_reactor::Handle::current();
+        let handle = tokio_reactor::Handle::default();
         AddrIncoming::from_std(listener, &handle)
             .map(Server::builder)
     }
@@ -144,7 +144,7 @@ where
     I: Stream,
     I::Error: Into<Box<::std::error::Error + Send + Sync>>,
     I::Item: AsyncRead + AsyncWrite + Send + 'static,
-    S: NewService<ReqBody=Body, ResBody=B>,
+    S: MakeServiceRef<I::Item, ReqBody=Body, ResBody=B>,
     S::Error: Into<Box<::std::error::Error + Send + Sync>>,
     S::Service: 'static,
     B: Payload,
@@ -203,7 +203,7 @@ where
     I: Stream,
     I::Error: Into<Box<::std::error::Error + Send + Sync>>,
     I::Item: AsyncRead + AsyncWrite + Send + 'static,
-    S: NewService<ReqBody=Body, ResBody=B>,
+    S: MakeServiceRef<I::Item, ReqBody=Body, ResBody=B>,
     S::Error: Into<Box<::std::error::Error + Send + Sync>>,
     S::Service: 'static,
     B: Payload,
@@ -244,6 +244,20 @@ impl<I, E> Builder<I, E> {
     /// Default is `true`.
     pub fn http1_keepalive(mut self, val: bool) -> Self {
         self.protocol.keep_alive(val);
+        self
+    }
+
+
+    /// Set whether HTTP/1 connections should support half-closures.
+    ///
+    /// Clients can chose to shutdown their write-side while waiting
+    /// for the server to respond. Setting this to `false` will
+    /// automatically close any connection immediately if `read`
+    /// detects an EOF.
+    ///
+    /// Default is `true`.
+    pub fn http1_half_close(mut self, val: bool) -> Self {
+        self.protocol.http1_half_close(val);
         self
     }
 
@@ -332,7 +346,7 @@ impl<I, E> Builder<I, E> {
         I: Stream,
         I::Error: Into<Box<::std::error::Error + Send + Sync>>,
         I::Item: AsyncRead + AsyncWrite + Send + 'static,
-        S: NewService<ReqBody=Body, ResBody=B>,
+        S: MakeServiceRef<I::Item, ReqBody=Body, ResBody=B>,
         S::Error: Into<Box<::std::error::Error + Send + Sync>>,
         S::Service: 'static,
         B: Payload,
@@ -362,6 +376,26 @@ impl<E> Builder<AddrIncoming, E> {
     /// Set the value of `TCP_NODELAY` option for accepted connections.
     pub fn tcp_nodelay(mut self, enabled: bool) -> Self {
         self.incoming.set_nodelay(enabled);
+        self
+    }
+
+    /// Set whether to sleep on accept errors.
+    ///
+    /// A possible scenario is that the process has hit the max open files
+    /// allowed, and so trying to accept a new connection will fail with
+    /// EMFILE. In some cases, it's preferable to just wait for some time, if
+    /// the application will likely close some files (or connections), and try
+    /// to accept the connection again. If this option is true, the error will
+    /// be logged at the error level, since it is still a big deal, and then
+    /// the listener will sleep for 1 second.
+    ///
+    /// In other cases, hitting the max open files should be treat similarly
+    /// to being out-of-memory, and simply error (and shutdown). Setting this
+    /// option to false will allow that.
+    ///
+    /// For more details see [`AddrIncoming::set_sleep_on_errors`]
+    pub fn tcp_sleep_on_accept_errors(mut self, val: bool) -> Self {
+        self.incoming.set_sleep_on_errors(val);
         self
     }
 }

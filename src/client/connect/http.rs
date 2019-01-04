@@ -234,8 +234,8 @@ where
             Some(s) => s,
             None => return invalid_url(InvalidUrl::MissingAuthority, &self.handle),
         };
-        let port = match dst.uri.port() {
-            Some(port) => port,
+        let port = match dst.uri.port_part() {
+            Some(port) => port.as_u16(),
             None => if dst.uri.scheme_part() == Some(&Scheme::HTTPS) { 443 } else { 80 },
         };
 
@@ -502,7 +502,7 @@ fn connect(addr: &SocketAddr, local_addr: &Option<IpAddr>, handle: &Option<Handl
 
     let handle = match *handle {
         Some(ref handle) => Cow::Borrowed(handle),
-        None => Cow::Owned(Handle::current()),
+        None => Cow::Owned(Handle::default()),
     };
 
     Ok(TcpStream::connect_std(builder.to_tcp_stream()?, addr, &handle))
@@ -597,6 +597,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "__internal_happy_eyeballs_tests"), ignore)]
     fn client_happy_eyeballs() {
         extern crate pretty_env_logger;
 

@@ -25,7 +25,7 @@ use common::exec::{Exec, H2Exec, NewSvcExec};
 use common::io::Rewind;
 use error::{Kind, Parse};
 use proto;
-use service::{NewService, Service};
+use service::{MakeServiceRef, Service};
 use upgrade::Upgraded;
 
 pub(super) use self::spawn_all::NoopWatcher;
@@ -33,7 +33,7 @@ use self::spawn_all::NewSvcTask;
 pub(super) use self::spawn_all::Watcher;
 pub(super) use self::upgrades::UpgradeableConnection;
 
-#[cfg(feature = "runtime")] pub use super::tcp::AddrIncoming;
+#[cfg(feature = "runtime")] pub use super::tcp::{AddrIncoming, AddrStream};
 
 /// A lower-level configuration of the HTTP protocol.
 ///
@@ -44,6 +44,7 @@ pub(super) use self::upgrades::UpgradeableConnection;
 #[derive(Clone, Debug)]
 pub struct Http<E = Exec> {
     exec: E,
+    h1_half_close: bool,
     h1_writev: bool,
     mode: ConnectionMode,
     keep_alive: bool,
@@ -69,13 +70,13 @@ enum ConnectionMode {
 #[derive(Debug)]
 pub struct Serve<I, S, E = Exec> {
     incoming: I,
-    new_service: S,
+    make_service: S,
     protocol: Http<E>,
 }
 
 /// A future building a new `Service` to a `Connection`.
 ///
-/// Wraps the future returned from `NewService` into one that returns
+/// Wraps the future returned from `MakeService` into one that returns
 /// a `Connection`.
 #[must_use = "futures do nothing unless polled"]
 #[derive(Debug)]
@@ -162,6 +163,7 @@ impl Http {
     pub fn new() -> Http {
         Http {
             exec: Exec::Default,
+            h1_half_close: true,
             h1_writev: true,
             mode: ConnectionMode::Fallback,
             keep_alive: true,
@@ -191,6 +193,20 @@ impl<E> Http<E> {
         } else {
             self.mode = ConnectionMode::Fallback;
         }
+        self
+    }
+
+    /// Set whether HTTP/1 connections should support half-closures.
+    ///
+    /// Clients can chose to shutdown their write-side while waiting
+    /// for the server to respond. Setting this to `false` will
+    /// automatically close any connection immediately if `read`
+    /// detects an EOF.
+    ///
+    /// Default is `true`.
+    #[inline]
+    pub fn http1_half_close(&mut self, val: bool) -> &mut Self {
+        self.h1_half_close = val;
         self
     }
 
@@ -260,6 +276,7 @@ impl<E> Http<E> {
     pub fn with_executor<E2>(self, exec: E2) -> Http<E2> {
         Http {
             exec,
+            h1_half_close: self.h1_half_close,
             h1_writev: self.h1_writev,
             mode: self.mode,
             keep_alive: self.keep_alive,
@@ -318,6 +335,9 @@ impl<E> Http<E> {
                 if !self.keep_alive {
                     conn.disable_keep_alive();
                 }
+                if !self.h1_half_close {
+                    conn.set_disable_half_close();
+                }
                 if !self.h1_writev {
                     conn.set_write_strategy_flatten();
                 }
@@ -349,12 +369,16 @@ impl<E> Http<E> {
     ///
     /// This method will bind the `addr` provided with a new TCP listener ready
     /// to accept connections. Each connection will be processed with the
-    /// `new_service` object provided, creating a new service per
+    /// `make_service` object provided, creating a new service per
     /// connection.
     #[cfg(feature = "runtime")]
-    pub fn serve_addr<S, Bd>(&self, addr: &SocketAddr, new_service: S) -> ::Result<Serve<AddrIncoming, S, E>>
+    pub fn serve_addr<S, Bd>(&self, addr: &SocketAddr, make_service: S) -> ::Result<Serve<AddrIncoming, S, E>>
     where
-        S: NewService<ReqBody=Body, ResBody=Bd>,
+        S: MakeServiceRef<
+            AddrStream,
+            ReqBody=Body,
+            ResBody=Bd,
+        >,
         S::Error: Into<Box<::std::error::Error + Send + Sync>>,
         Bd: Payload,
         E: H2Exec<<S::Service as Service>::Future, Bd>,
@@ -363,19 +387,23 @@ impl<E> Http<E> {
         if self.keep_alive {
             incoming.set_keepalive(Some(Duration::from_secs(90)));
         }
-        Ok(self.serve_incoming(incoming, new_service))
+        Ok(self.serve_incoming(incoming, make_service))
     }
 
     /// Bind the provided `addr` with the `Handle` and return a [`Serve`](Serve)
     ///
     /// This method will bind the `addr` provided with a new TCP listener ready
     /// to accept connections. Each connection will be processed with the
-    /// `new_service` object provided, creating a new service per
+    /// `make_service` object provided, creating a new service per
     /// connection.
     #[cfg(feature = "runtime")]
-    pub fn serve_addr_handle<S, Bd>(&self, addr: &SocketAddr, handle: &Handle, new_service: S) -> ::Result<Serve<AddrIncoming, S, E>>
+    pub fn serve_addr_handle<S, Bd>(&self, addr: &SocketAddr, handle: &Handle, make_service: S) -> ::Result<Serve<AddrIncoming, S, E>>
     where
-        S: NewService<ReqBody=Body, ResBody=Bd>,
+        S: MakeServiceRef<
+            AddrStream,
+            ReqBody=Body,
+            ResBody=Bd,
+        >,
         S::Error: Into<Box<::std::error::Error + Send + Sync>>,
         Bd: Payload,
         E: H2Exec<<S::Service as Service>::Future, Bd>,
@@ -384,23 +412,27 @@ impl<E> Http<E> {
         if self.keep_alive {
             incoming.set_keepalive(Some(Duration::from_secs(90)));
         }
-        Ok(self.serve_incoming(incoming, new_service))
+        Ok(self.serve_incoming(incoming, make_service))
     }
 
-    /// Bind the provided stream of incoming IO objects with a `NewService`.
-    pub fn serve_incoming<I, S, Bd>(&self, incoming: I, new_service: S) -> Serve<I, S, E>
+    /// Bind the provided stream of incoming IO objects with a `MakeService`.
+    pub fn serve_incoming<I, S, Bd>(&self, incoming: I, make_service: S) -> Serve<I, S, E>
     where
         I: Stream,
         I::Error: Into<Box<::std::error::Error + Send + Sync>>,
         I::Item: AsyncRead + AsyncWrite,
-        S: NewService<ReqBody=Body, ResBody=Bd>,
+        S: MakeServiceRef<
+            I::Item,
+            ReqBody=Body,
+            ResBody=Bd,
+        >,
         S::Error: Into<Box<::std::error::Error + Send + Sync>>,
         Bd: Payload,
         E: H2Exec<<S::Service as Service>::Future, Bd>,
     {
         Serve {
-            incoming: incoming,
-            new_service: new_service,
+            incoming,
+            make_service,
             protocol: self.clone(),
         }
     }
@@ -604,8 +636,9 @@ where
     I: Stream,
     I::Item: AsyncRead + AsyncWrite,
     I::Error: Into<Box<::std::error::Error + Send + Sync>>,
-    S: NewService<ReqBody=Body, ResBody=B>,
-    S::Error: Into<Box<::std::error::Error + Send + Sync>>,
+    S: MakeServiceRef<I::Item, ReqBody=Body, ResBody=B>,
+    //S::Error2: Into<Box<::std::error::Error + Send + Sync>>,
+    //SME: Into<Box<::std::error::Error + Send + Sync>>,
     B: Payload,
     E: H2Exec<<S::Service as Service>::Future, B>,
 {
@@ -614,7 +647,7 @@ where
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if let Some(io) = try_ready!(self.incoming.poll().map_err(::Error::new_accept)) {
-            let new_fut = self.new_service.new_service();
+            let new_fut = self.make_service.make_service_ref(&io);
             Ok(Async::Ready(Some(Connecting {
                 future: new_fut,
                 io: Some(io),
@@ -666,8 +699,11 @@ where
     I: Stream,
     I::Error: Into<Box<::std::error::Error + Send + Sync>>,
     I::Item: AsyncRead + AsyncWrite + Send + 'static,
-    S: NewService<ReqBody=Body, ResBody=B>,
-    S::Error: Into<Box<::std::error::Error + Send + Sync>>,
+    S: MakeServiceRef<
+        I::Item,
+        ReqBody=Body,
+        ResBody=B,
+    >,
     B: Payload,
     E: H2Exec<<S::Service as Service>::Future, B>,
 {

@@ -85,33 +85,26 @@ struct PoolInner<T> {
 // doesn't need it!
 struct WeakOpt<T>(Option<Weak<T>>);
 
-// Newtypes to act as keyword arguments for `Pool::new`...
-
-// FIXME: allow() required due to `impl Trait` leaking types to this lint
-#[allow(missing_debug_implementations)]
-pub(super) struct Enabled(pub(super) bool);
-
-// FIXME: allow() required due to `impl Trait` leaking types to this lint
-#[allow(missing_debug_implementations)]
-pub(super) struct IdleTimeout(pub(super) Option<Duration>);
-
-// FIXME: allow() required due to `impl Trait` leaking types to this lint
-#[allow(missing_debug_implementations)]
-pub(super) struct MaxIdlePerHost(pub(super) usize);
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Config {
+    pub(super) enabled: bool,
+    pub(super) keep_alive_timeout: Option<Duration>,
+    pub(super) max_idle_per_host: usize,
+}
 
 impl<T> Pool<T> {
-    pub fn new(enabled: Enabled, timeout: IdleTimeout, max_idle: MaxIdlePerHost, __exec: &Exec) -> Pool<T> {
-        let inner = if enabled.0 {
+    pub fn new(config: Config, __exec: &Exec) -> Pool<T> {
+        let inner = if config.enabled {
              Some(Arc::new(Mutex::new(PoolInner {
                 connecting: HashSet::new(),
                 idle: HashMap::new(),
                 #[cfg(feature = "runtime")]
                 idle_interval_ref: None,
-                max_idle_per_host: max_idle.0,
+                max_idle_per_host: config.max_idle_per_host,
                 waiters: HashMap::new(),
                 #[cfg(feature = "runtime")]
                 exec: __exec.clone(),
-                timeout: timeout.0,
+                timeout: config.keep_alive_timeout,
              })))
         } else {
             None
@@ -838,10 +831,11 @@ mod tests {
     }
 
     fn pool_max_idle_no_timer<T>(max_idle: usize) -> Pool<T> {
-        let pool = Pool::new(
-            super::Enabled(true),
-            super::IdleTimeout(Some(Duration::from_millis(100))),
-            super::MaxIdlePerHost(max_idle),
+        let pool = Pool::new(super::Config {
+                enabled: true,
+                keep_alive_timeout: Some(Duration::from_millis(100)),
+                max_idle_per_host: max_idle,
+            },
             &Exec::Default,
         );
         pool.no_timer();
@@ -919,10 +913,11 @@ mod tests {
         use std::time::Instant;
         use tokio_timer::Delay;
         let mut rt = ::tokio::runtime::current_thread::Runtime::new().unwrap();
-        let pool = Pool::new(
-            super::Enabled(true),
-            super::IdleTimeout(Some(Duration::from_millis(100))),
-            super::MaxIdlePerHost(::std::usize::MAX),
+        let pool = Pool::new(super::Config {
+                enabled: true,
+                keep_alive_timeout: Some(Duration::from_millis(100)),
+                max_idle_per_host: ::std::usize::MAX,
+            },
             &Exec::Default,
         );
 
