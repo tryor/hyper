@@ -565,7 +565,7 @@ pub struct ResponseFuture {
 
 impl ResponseFuture {
     
-    ///structure ResponseFuture
+    ///structure ResponseFuture, by trywen@qq.com
     pub fn new(fut: Box<Future<Item=Response<Body>, Error=::Error> + Send>) -> Self {
         Self {
             inner: fut,
