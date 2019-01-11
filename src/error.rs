@@ -187,7 +187,8 @@ impl Error {
         Error::new(Kind::MismatchedResponse, None)
     }
 
-    pub(crate) fn new_io(cause: io::Error) -> Error {
+    /// new error by io error
+    pub fn new_io(cause: io::Error) -> Error {
         Error::new(Kind::Io, Some(cause.into()))
     }
 
