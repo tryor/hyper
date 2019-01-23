@@ -177,6 +177,11 @@ impl<T: Poolable> Pool<T> {
             Some(ref_inner) => {
                 match ref_inner.lock(){
                     Ok(mut inner) => {
+                        info!("inner.idle.len(){:?}", inner.idle.len());
+                        for (k, mut vs) in inner.idle.iter_mut(){
+                            info!("inner.idle.{:?}.len(){:?}", k, vs.len());
+                            vs.clear();
+                        }
                         inner.idle.clear();
                     },
                     _ => {}
