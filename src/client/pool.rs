@@ -171,6 +171,21 @@ impl<T: Poolable> Pool<T> {
         })
     }
 
+    //add by trywen@qq.com, 2019-01-23
+    pub(super) fn clear_idles(&self){
+        match self.inner.as_ref(){
+            Some(ref_inner) => {
+                match ref_inner.lock(){
+                    Ok(mut inner) => {
+                        inner.idle.clear();
+                    },
+                    _ => {}
+                }
+            },
+            None => {}
+        }
+    }
+
     #[cfg(test)]
     fn locked(&self) -> ::std::sync::MutexGuard<PoolInner<T>> {
         self

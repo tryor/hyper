@@ -162,6 +162,12 @@ impl Client<(), Body> {
     pub fn builder() -> Builder {
         Builder::default()
     }
+
+    //add by trywen@qq.com, 2019-01-23
+    ///clear pool idles
+    pub fn clear_pool_idles(&self){
+        self.pool.clear_idles();
+    }
 }
 
 impl<C, B> Client<C, B>
