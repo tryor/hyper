@@ -163,11 +163,7 @@ impl Client<(), Body> {
         Builder::default()
     }
 
-    //add by trywen@qq.com, 2019-01-23
-    ///clear pool idles
-    pub fn clear_pool_idles(&self){
-        self.pool.clear_idles();
-    }
+
 }
 
 impl<C, B> Client<C, B>
@@ -177,6 +173,12 @@ where C: Connect + Sync + 'static,
       B: Payload + Send + 'static,
       B::Data: Send,
 {
+
+    //add by trywen@qq.com, 2019-01-23
+    ///clear pool idles
+    pub fn clear_pool_idles(&self){
+        self.pool.clear_idles();
+    }
 
     /// Send a `GET` request to the supplied `Uri`.
     ///
