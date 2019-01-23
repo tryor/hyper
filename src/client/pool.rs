@@ -177,20 +177,17 @@ impl<T: Poolable> Pool<T> {
             Some(ref_inner) => {
                 match ref_inner.lock(){
                     Ok(mut inner) => {
-                        info!("inner.idle.len(){:?}", inner.idle.len());
                         for (k, mut vs) in inner.idle.iter_mut(){
-                            info!("1 inner.idle.{:?}.len():{:?}", k, vs.len());
                             loop{
                                 if let Some(c) = vs.pop(){
-                                    drop(c.value);
+                                    //drop(c.value);
                                 }else{
                                     break
                                 }
                             }
-                            info!("2 inner.idle.{:?}.len():{:?}", k, vs.len());
                         }
                         inner.idle.clear();
-                        inner.max_idle_per_host = 0;
+                        //inner.max_idle_per_host = 0;
                     },
                     _ => {}
                 }
